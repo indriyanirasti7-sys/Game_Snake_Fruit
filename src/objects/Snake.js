@@ -7,6 +7,7 @@ export default class Snake {
         this.body = [];
         this.direction = 'right';
         this.nextDirection = 'right';
+        this.headTween = null;
         
         // Initialize snake with 3 segments
         for(let i = 0; i < 3; i++) {
@@ -19,6 +20,21 @@ export default class Snake {
         
         // Create sprites
         this.createSprites();
+    }
+    
+    destroy() {
+        // Hentikan semua tween
+        if(this.headTween) {
+            this.headTween.stop();
+        }
+        
+        // Hancurkan semua sprite
+        this.body.forEach(segment => {
+            if(segment.sprite && segment.sprite.destroy) {
+                segment.sprite.destroy();
+            }
+        });
+        this.body = [];
     }
     
     createSprites() {
@@ -36,7 +52,7 @@ export default class Snake {
             
             // Add idle animation for head
             if(isHead) {
-                this.scene.tweens.add({
+                this.headTween = this.scene.tweens.add({
                     targets: sprite,
                     y: sprite.y - 2,
                     duration: 800,
@@ -86,7 +102,9 @@ export default class Snake {
         if(!ate) {
             // Remove tail
             const tail = this.body.pop();
-            tail.sprite.destroy();
+            if(tail.sprite && tail.sprite.destroy) {
+                tail.sprite.destroy();
+            }
         }
         
         // Create sprite for new head
@@ -99,8 +117,13 @@ export default class Snake {
         newSprite.setDisplaySize(this.cellSize - 2, this.cellSize - 2);
         this.body[0].sprite = newSprite;
         
+        // Hentikan tween head lama jika ada
+        if(this.headTween) {
+            this.headTween.stop();
+        }
+        
         // Animate head
-        this.scene.tweens.add({
+        this.headTween = this.scene.tweens.add({
             targets: newSprite,
             y: newSprite.y - 2,
             duration: 800,
@@ -117,7 +140,7 @@ export default class Snake {
     
     updateSprites() {
         this.body.forEach((segment, index) => {
-            if(segment.sprite) {
+            if(segment.sprite && segment.sprite.active) {
                 segment.sprite.x = segment.x * this.cellSize + this.cellSize/2;
                 segment.sprite.y = segment.y * this.cellSize + this.cellSize/2;
                 
@@ -136,7 +159,7 @@ export default class Snake {
     updateSpritesRotation() {
         for(let i = 0; i < this.body.length; i++) {
             const segment = this.body[i];
-            if(!segment.sprite) continue;
+            if(!segment.sprite || !segment.sprite.active) continue;
             
             let angle = 0;
             
@@ -178,6 +201,8 @@ export default class Snake {
     }
     
     checkCollision() {
+        if(this.body.length === 0) return true;
+        
         const head = this.body[0];
         
         // Wall collision

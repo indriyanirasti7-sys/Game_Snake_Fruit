@@ -16,9 +16,22 @@ export default class GameScene extends Phaser.Scene {
         this.baseSpeed = 250;
         this.currentSpeed = 250;
         this.particles = null;
+        this.isRespawning = false;
     }
     
     create() {
+        // Reset semua state
+        this.score = 0;
+        this.gameOver = false;
+        this.currentSpeed = this.baseSpeed;
+        this.isRespawning = false;
+        
+        // Bersihkan interval jika ada
+        if(this.moveInterval) {
+            clearInterval(this.moveInterval);
+            this.moveInterval = null;
+        }
+        
         // Background
         this.add.tileSprite(0, 0, 1280, 720, 'grassTile').setOrigin(0, 0);
         
@@ -57,6 +70,8 @@ export default class GameScene extends Phaser.Scene {
         this.startMovement();
         
         // Events
+        this.events.off('eat'); // Remove old listeners
+        this.events.off('gameover');
         this.events.on('eat', this.onEat, this);
         this.events.on('gameover', this.onGameOver, this);
     }
@@ -76,16 +91,23 @@ export default class GameScene extends Phaser.Scene {
     }
     
     startMovement() {
-        if(this.moveInterval) clearInterval(this.moveInterval);
+        if(this.moveInterval) {
+            clearInterval(this.moveInterval);
+            this.moveInterval = null;
+        }
+        
+        if(this.gameOver) return;
         
         this.moveInterval = setInterval(() => {
-            if(!this.gameOver) {
+            if(!this.gameOver && !this.isRespawning) {
                 this.updateMovement();
             }
         }, this.currentSpeed);
     }
     
     updateMovement() {
+        if(this.gameOver) return;
+        
         // Get direction from input
         let newDir = null;
         
@@ -105,7 +127,7 @@ export default class GameScene extends Phaser.Scene {
             this.events.emit('eat');
         }
         
-        // Check collision with self and walls is handled in Snake class
+        // Check collision
         if(this.snake.checkCollision()) {
             this.events.emit('gameover');
         }
@@ -129,14 +151,21 @@ export default class GameScene extends Phaser.Scene {
         this.startMovement(); // Restart interval with new speed
         
         // Update UI
-        this.events.emit('updateScore', this.score);
+        const uiScene = this.scene.get('UIScene');
+        if(uiScene) {
+            uiScene.events.emit('updateScore', this.score);
+        }
         
-        // Play retro sound (Web Audio)
+        // Play retro sound
         this.playEatSound();
     }
     
     createEatEffect() {
+        if(!this.fruit) return;
+        
         const fruitPos = this.fruit.getPosition();
+        if(!fruitPos) return;
+        
         const worldX = fruitPos.x * this.cellSize + this.cellSize/2;
         const worldY = fruitPos.y * this.cellSize + this.cellSize/2;
         
@@ -172,28 +201,42 @@ export default class GameScene extends Phaser.Scene {
     
     playEatSound() {
         // Simple beep sound using Web Audio
-        if(!this.game.audioContext) {
-            this.game.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        try {
+            if(!this.game.audioContext) {
+                this.game.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            
+            // Resume audio context if suspended
+            if(this.game.audioContext.state === 'suspended') {
+                this.game.audioContext.resume();
+            }
+            
+            const ctx = this.game.audioContext;
+            const oscillator = ctx.createOscillator();
+            const gainNode = ctx.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(ctx.destination);
+            
+            oscillator.frequency.value = 880;
+            gainNode.gain.value = 0.1;
+            
+            oscillator.start();
+            gainNode.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.3);
+            oscillator.stop(ctx.currentTime + 0.3);
+        } catch(e) {
+            // Silent fail if audio not supported
         }
-        
-        const ctx = this.game.audioContext;
-        const oscillator = ctx.createOscillator();
-        const gainNode = ctx.createGain();
-        
-        oscillator.connect(gainNode);
-        gainNode.connect(ctx.destination);
-        
-        oscillator.frequency.value = 880;
-        gainNode.gain.value = 0.1;
-        
-        oscillator.start();
-        gainNode.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.3);
-        oscillator.stop(ctx.currentTime + 0.3);
     }
     
     onGameOver() {
+        if(this.gameOver) return;
+        
         this.gameOver = true;
-        if(this.moveInterval) clearInterval(this.moveInterval);
+        if(this.moveInterval) {
+            clearInterval(this.moveInterval);
+            this.moveInterval = null;
+        }
         
         // Save high score
         const currentHigh = localStorage.getItem('snakeHighScore') || 0;
@@ -202,15 +245,41 @@ export default class GameScene extends Phaser.Scene {
         }
         
         // Show game over overlay
-        this.events.emit('showGameOver', this.score);
+        const uiScene = this.scene.get('UIScene');
+        if(uiScene) {
+            uiScene.showGameOver(this.score);
+        }
+    }
+    
+    restartGame() {
+        this.isRespawning = true;
+        
+        // Bersihkan semua sprite lama
+        if(this.snake) {
+            this.snake.destroy();
+        }
+        if(this.fruit && this.fruit.sprite) {
+            this.fruit.sprite.destroy();
+        }
+        
+        // Hapus semua child kecuali background
+        this.children.list.forEach(child => {
+            if(child !== this.background && child.type !== 'TileSprite') {
+                if(child.destroy) child.destroy();
+            }
+        });
+        
+        // Reset dan recreate
+        this.create();
+        this.isRespawning = false;
     }
     
     update() {
         if(this.gameOver) return;
         
         // Update fruit animation
-        this.fruit.update();
-        
-        // Check pause (handled in UIScene)
+        if(this.fruit) {
+            this.fruit.update();
+        }
     }
 }
